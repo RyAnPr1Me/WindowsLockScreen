@@ -35,9 +35,11 @@ The default unlock code is **"QWERTY"**, which is provided as a placeholder. You
 4. **Cleanup**:
    - Automatically restores Task Manager access and input control upon unlocking.
 
----
+DISCLAIMER: This script modifies critical system settings and could potentially render your computer inoperable if used incorrectly. The author assumes no liability for any damages or system failures resulting from its use. Users are strongly advised to back up all important data and proceed only if they fully understand the risks and have the technical expertise to reverse any changes if necessary. By using this script, you acknowledge these risks and accept full responsibility for any consequences.
 
 ## **Setup and Usage**
 1. Clone this repository:
    ```bash
    git clone https://github.com/yourusername/system-lockdown-script.git
+
+   

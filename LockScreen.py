@@ -28,7 +28,7 @@ if platform.system() != 'Windows':
 
 class Config:
     DEFAULT_CONFIG = {
-        "unlock_code_hash": bcrypt.hashpw("QWERTY".encode(), bcrypt.gensalt()).decode(),
+        "unlock_code_hash": "$2b$12$ophm.EJxFa48oM3HrkNcKeojO9aeeGuH0nro4TcMvqOWPHYNhUA5K",  # Hash for "QWERTY"
         "auto_unlock_minutes": 30,
         "max_attempts": 3,
         "lockout_duration": 300,  # 5 minutes in seconds
@@ -79,11 +79,16 @@ class LockScreen:
         self.lock = Lock()
         self.remaining_time = config['auto_unlock_minutes'] * 60
         self.timer_label = None
+        self.keyboard_hook_thread = None
+        self.is_running = True
 
     def block_input(self, enable=True):
         try:
-            BLOCK_INPUT(bool(enable))
-            logging.info(f"Input {'blocked' if enable else 'unblocked'}")
+            result = BLOCK_INPUT(bool(enable))
+            if result:
+                logging.info(f"Input {'blocked' if enable else 'unblocked'}")
+            else:
+                logging.warning(f"Failed to {'block' if enable else 'unblock'} input - insufficient privileges or error")
         except Exception as e:
             logging.error(f"Error blocking input: {e}")
 
@@ -134,12 +139,16 @@ class LockScreen:
                 logging.error(f"Error during code verification: {e}")
 
     def update_timer(self):
-        if self.timer_label and self.remaining_time > 0:
-            minutes = self.remaining_time // 60
-            seconds = self.remaining_time % 60
-            self.timer_label.config(text=f"Auto-unlock in {minutes:02d}:{seconds:02d}")
-            self.remaining_time -= 1
-            self.root.after(1000, self.update_timer)
+        if self.timer_label and self.remaining_time > 0 and self.root:
+            try:
+                minutes = self.remaining_time // 60
+                seconds = self.remaining_time % 60
+                self.timer_label.config(text=f"Auto-unlock in {minutes:02d}:{seconds:02d}")
+                self.remaining_time -= 1
+                self.root.after(1000, self.update_timer)
+            except tk.TclError:
+                # Timer label or root window was destroyed
+                pass
         elif self.remaining_time <= 0:
             self.auto_unlock()
 
@@ -202,6 +211,7 @@ class LockScreen:
         self.root.mainloop()
 
     def cleanup(self):
+        self.is_running = False  # Signal threads to stop
         self.enable_task_manager()
         self.block_input(False)
         logging.info("Cleanup completed")
@@ -210,7 +220,8 @@ class LockScreen:
         try:
             self.disable_task_manager()
             self.block_input(True)
-            Thread(target=self.block_shortcuts, daemon=True).start()
+            self.keyboard_hook_thread = Thread(target=self.block_shortcuts, daemon=True)
+            self.keyboard_hook_thread.start()
             self.setup_lock_screen()
         except Exception as e:
             logging.error(f"Error in main execution: {e}")
@@ -237,13 +248,27 @@ class LockScreen:
             logging.error("Failed to install keyboard hook")
             return
 
+        # Define MSG structure for proper message handling
+        class MSG(ctypes.Structure):
+            _fields_ = [("hwnd", wintypes.HWND),
+                       ("message", wintypes.UINT),
+                       ("wParam", wintypes.WPARAM),
+                       ("lParam", wintypes.LPARAM),
+                       ("time", wintypes.DWORD),
+                       ("pt", wintypes.POINT)]
+
         try:
-            while True:
-                USER32.PeekMessageW(None, 0, 0, 0, 0)
+            msg = MSG()
+            while self.is_running:
+                # Proper message loop with sleep to prevent 100% CPU usage
+                bRet = USER32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)
+                if bRet == 0:  # No message available
+                    time.sleep(0.01)  # Sleep for 10ms to prevent 100% CPU usage
         except Exception as e:
             logging.error(f"Error in keyboard hook: {e}")
         finally:
-            USER32.UnhookWindowsHookEx(hHook)
+            if hHook:
+                USER32.UnhookWindowsHookEx(hHook)
 
 if __name__ == "__main__":
     lock_screen = LockScreen()
